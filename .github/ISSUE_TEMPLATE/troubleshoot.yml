@@ -1,0 +1,122 @@
+name: Troubleshoot a problem
+description: A note did not download, login failed, or the tool stopped with an error.
+title: "[Problem] "
+labels: ["troubleshoot"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please fill in what you can; the console output and the `_debug` files help most.
+
+        **Privacy:** before posting, remove your password, email, S-user ID and any company data from text and screenshots.
+        Never attach `.sap_credential.xml`, `.sap_account.txt` or the `.sap_profile` folder.
+
+  - type: input
+    id: version
+    attributes:
+      label: Tool version
+      description: The first line in the console, e.g. `SAP Note Downloader v9.4 EN`.
+      placeholder: v9.4 EN
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where did it go wrong?
+      options:
+        - Starting (browser does not open / cannot connect to the browser)
+        - Choosing the txt file / entering note numbers
+        - Login (S-user, password, MFA)
+        - Account selection (one email with several S-users)
+        - Note page (Download button not found / page kept loading)
+        - Download (clicked, but no file arrived)
+        - Several windows (-Windows) behave differently from one window
+        - Session expired during the run
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        I ran Run_SAP_Note_Download.bat with notes 3503016 and 3262931.
+        Both ended with NO_DOWNLOAD - Download button not found.
+    validations:
+      required: true
+
+  - type: input
+    id: notes
+    attributes:
+      label: Note numbers that failed
+      placeholder: 3503016, 3262931
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Copy everything from the black console window (right-click the title bar > Edit > Select All, then Enter to copy).
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: download_log.csv
+      description: Contents of `sap_notes\download_log.csv`.
+      render: text
+
+  - type: textarea
+    id: debug
+    attributes:
+      label: Diagnostic files
+      description: |
+        For each failed note the tool saves `<note>.png` (screenshot) and `<note>_buttons.txt` (buttons on the page) in `sap_notes\_debug\`.
+        Zip the `_debug` folder and drag it here. Check the screenshots for company data first.
+      placeholder: Drag the zipped _debug folder or the files here.
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      description: "Shown in the console as `Browser: ...`."
+      options:
+        - Google Chrome
+        - Microsoft Edge (Chrome not installed)
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Number of windows
+      description: The `-Windows` value, or 3 if you did not set it.
+      placeholder: "3"
+
+  - type: input
+    id: os
+    attributes:
+      label: Windows and PowerShell version
+      description: Run `powershell -c "$PSVersionTable.PSVersion; [Environment]::OSVersion.VersionString"` and paste the result.
+      placeholder: PowerShell 5.1.19041, Windows 10.0.19045
+
+  - type: checkboxes
+    id: tried
+    attributes:
+      label: Already tried
+      options:
+        - label: Closed all browser windows and the console, then ran it again
+        - label: Ran it with `-Windows 1`
+        - label: Ran `Reset_Login.bat` and entered the login again (login problems only)
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed my password, email, S-user ID and company data from everything above
+          required: true

@@ -43,6 +43,14 @@ Pass these to `Run_SAP_Note_Download.bat`:
 
 Double-click `Reset_Login.bat`. It deletes the saved password and account choice; you enter them again on the next run.
 
+## Troubleshooting
+
+1. Close all browser windows and the console, then run it again.
+2. Try one window at a time: `Run_SAP_Note_Download.bat -Windows 1`.
+3. For login problems, run `Reset_Login.bat` and enter the login again.
+
+If it still fails, open an issue with the **Troubleshoot a problem** template and attach the console output, `sap_notes\download_log.csv` and the zipped `sap_notes\_debug\` folder. Remove passwords, emails, S-user IDs and company data first.
+
 ## Files created locally
 
 These contain your login data or downloads and are listed in `.gitignore`. Do not share them:

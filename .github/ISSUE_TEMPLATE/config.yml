@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Usage and options
+    url: https://github.com/Ronald-Leung0115/SAP-Note-Downloader#readme
+    about: How to run the tool, its options and how to reset the login.
