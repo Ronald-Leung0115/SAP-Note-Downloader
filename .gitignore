@@ -1,0 +1,6 @@
+# Local files created when the tool runs (never commit these)
+.sap_credential.xml
+.sap_account.txt
+.sap_profile/
+sap_notes/
+notes.txt
