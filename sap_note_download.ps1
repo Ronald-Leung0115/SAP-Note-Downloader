@@ -7,7 +7,7 @@
     double-click Run_SAP_Note_Download.bat
     -> enter S-user and password (encrypted with Windows DPAPI in .sap_credential.xml;
        only your Windows account on this PC can decrypt it)
-    -> pick a txt file (one note number per line); press Cancel to type them instead
+    -> type note numbers, or enter F to select a txt file (one note number per line)
   Afterwards: logs in automatically; if SAP asks for MFA, complete it in the Chrome window.
 
   Email with several S-users: the first time SAP shows "Account selection", you pick the
@@ -98,8 +98,13 @@ $raw = @()
 if ($Notes) { $raw += $Notes }
 if (-not $raw -and -not $NotesFile) {
     Write-Host ''
-    Write-Host 'Select the txt file with note numbers in the dialog (Cancel = type them instead)...'
-    $NotesFile = Select-NotesFile
+    $choice = (Read-Host 'Enter SAP Note numbers (spaces or commas), or type F to select a TXT file').Trim()
+    if ($choice -eq 'F') {
+        $NotesFile = Select-NotesFile
+        if (-not $NotesFile) { Write-Host 'No txt file selected.' }
+    } else {
+        $raw += $choice
+    }
 }
 if ($NotesFile) {
     Write-Host "Reading $NotesFile"
@@ -115,9 +120,8 @@ function ConvertTo-NoteList($raw) {
     return , $l
 }
 $list = ConvertTo-NoteList $raw
-if ($list.Count -eq 0) {
-    if ($NotesFile) { Write-Host 'No valid note numbers found in the txt file.' }
-    elseif (-not $Notes) { Write-Host 'No txt file selected.' }
+if ($list.Count -eq 0 -and $NotesFile) {
+    Write-Host 'No valid note numbers found in the txt file.'
 }
 # No file / dialog closed / file has no notes -> ask to type until we get valid note numbers
 while ($list.Count -eq 0) {
