@@ -343,6 +343,27 @@ function Invoke-AccountJs($ws, [string]$mode) {
     return Invoke-Js $ws ($AccountJs.Replace('__MODE__', $mode))
 }
 
+# Match this console by a unique title, including when hosted by Windows Terminal.
+function Show-AccountPromptWindow {
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $previousTitle = [Console]::Title
+        $promptTitle = "SAP Note Downloader - Account selection ($PID)"
+        try {
+            [Console]::Title = $promptTitle
+            for ($attempt = 0; $attempt -lt 4; $attempt++) {
+                if ($shell.AppActivate($promptTitle)) { return }
+                Start-Sleep -Milliseconds 100
+            }
+        } finally {
+            [Console]::Title = $previousTitle
+        }
+    } catch {
+        Write-Verbose "Unable to bring the account prompt to the foreground: $($_.Exception.Message)"
+    }
+    Write-Host 'If this window is behind the browser, press Alt+Tab to select an account here.'
+}
+
 # Pick the S-user on the "Account selection" page; asks once and saves the choice
 function Select-SapAccount($ws) {
     # assign first: Windows PowerShell 5.1 returns a JSON array as ONE object from the pipeline
@@ -356,6 +377,7 @@ function Select-SapAccount($ws) {
         Write-Host ''
         Write-Host '=== This email has several S-user accounts. Which one should be used? ==='
         for ($i = 0; $i -lt $accs.Count; $i++) { Write-Host ("  {0}) {1}" -f ($i + 1), $accs[$i].label) }
+        Show-AccountPromptWindow
         while ($true) {
             $ans = (Read-Host "Enter 1-$($accs.Count) (or the S-user id)").Trim().ToUpper()
             $n = 0
@@ -680,7 +702,7 @@ function Get-FrameIds($ws) {
 # Rename the finished <guid> file to its real name (adds " (1)" etc. if the name exists)
 function Save-Download([string]$guid, [string]$name) {
     for ($try = 0; $try -lt 10; $try++) {
-        $src = Get-ChildItem -LiteralPath $OutDir -File | Where-Object { $_.Name -like "$guid*" } | Select-Object -First 1
+        $src = Get-ChildItem -LiteralPath $OutDir -File | Where-Object { $_.Name -eq $guid } | Select-Object -First 1
         if ($src) {
             $name = $name -replace '[\\/:*?"<>|]', '_'
             if (-not $name) { $name = $guid }
@@ -854,10 +876,12 @@ function Set-DownloadOwners {
     $waiting = @($script:tabs | Where-Object { $_.phase -eq 'wait' -and -not $_.guid } | Sort-Object { $_.clickedAt })
     foreach ($g in $free) {
         $d = $script:downloads[$g]
-        $t = $waiting | Where-Object { -not $_.guid -and ((Get-FrameIds $_.ws) -contains $d.frameId) } | Select-Object -First 1
-        if (-not $t) {
-            # e.g. started from a pop-up: give it to the window that has waited longest
-            $t = $waiting | Where-Object { -not $_.guid } | Select-Object -First 1
+        if ($d.name -match '^(?<note>[0-9]+)_[0-9]+\.sar$') {
+            # SAP's SAR filename identifies the note even when the download starts in a pop-up.
+            $downloadNote = $Matches['note'].TrimStart('0')
+            $t = $waiting | Where-Object { -not $_.guid -and $_.num -eq $downloadNote } | Select-Object -First 1
+        } else {
+            $t = $waiting | Where-Object { -not $_.guid -and ((Get-FrameIds $_.ws) -contains $d.frameId) } | Select-Object -First 1
         }
         if ($t) {
             $d.owner = $t.id; $t.guid = $g
