@@ -8,14 +8,14 @@ Nothing to install: it uses the built-in Windows PowerShell and Google Chrome (o
 
 1. Double-click `Run_SAP_Note_Download.bat`.
 2. First run only: enter your S-user (or email) and password. They are encrypted with Windows DPAPI in `.sap_credential.xml`, so only your Windows account on this PC can read them.
-3. Pick a txt file with note numbers (one per line, `#` starts a comment, see `notes.txt.example`). Press Cancel to type the numbers instead.
-4. The files are saved in `sap_notes\`, with a summary in `sap_notes\download_log.csv`.
+3. Type the note numbers separated by spaces or commas, or enter `F` to select a TXT file (one note number per line, `#` starts a comment, see `notes.txt.example`).
+4. The files are saved in `sap_notes\`, with a summary in `sap_notes\download_log.csv`. Interactive runs show a completion popup with the number of successful downloads and the log location.
 
 If SAP asks for MFA, complete it in the browser window and press Enter in the console.
 
 ## Features
 
-- Automatic login, including the "Account selection" page when one email has several S-users. You choose the account once; the choice is saved in `.sap_account.txt`.
+- Automatic login, including the "Account selection" page when one email has several S-users. Choose your account in the window above the browser, or click **Use CMD** to enter it in the console. Your choice is saved in `.sap_account.txt`.
 - Downloads several notes at the same time in separate browser windows (default 3). To change it:
 
   ```bat

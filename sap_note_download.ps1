@@ -7,7 +7,7 @@
     double-click Run_SAP_Note_Download.bat
     -> enter S-user and password (encrypted with Windows DPAPI in .sap_credential.xml;
        only your Windows account on this PC can decrypt it)
-    -> pick a txt file (one note number per line); press Cancel to type them instead
+    -> type note numbers, or enter F to select a txt file (one note number per line)
   Afterwards: logs in automatically; if SAP asks for MFA, complete it in the Chrome window.
 
   Email with several S-users: the first time SAP shows "Account selection", you pick the
@@ -94,12 +94,18 @@ function Select-NotesFile {
     return $null
 }
 
+$showCompletionPopup = -not $Notes -and -not $NotesFile
 $raw = @()
 if ($Notes) { $raw += $Notes }
 if (-not $raw -and -not $NotesFile) {
     Write-Host ''
-    Write-Host 'Select the txt file with note numbers in the dialog (Cancel = type them instead)...'
-    $NotesFile = Select-NotesFile
+    $choice = (Read-Host 'Enter SAP Note numbers (spaces or commas), or type F to select a TXT file').Trim()
+    if ($choice -eq 'F') {
+        $NotesFile = Select-NotesFile
+        if (-not $NotesFile) { Write-Host 'No txt file selected.' }
+    } else {
+        $raw += $choice
+    }
 }
 if ($NotesFile) {
     Write-Host "Reading $NotesFile"
@@ -115,9 +121,8 @@ function ConvertTo-NoteList($raw) {
     return , $l
 }
 $list = ConvertTo-NoteList $raw
-if ($list.Count -eq 0) {
-    if ($NotesFile) { Write-Host 'No valid note numbers found in the txt file.' }
-    elseif (-not $Notes) { Write-Host 'No txt file selected.' }
+if ($list.Count -eq 0 -and $NotesFile) {
+    Write-Host 'No valid note numbers found in the txt file.'
 }
 # No file / dialog closed / file has no notes -> ask to type until we get valid note numbers
 while ($list.Count -eq 0) {
@@ -339,6 +344,60 @@ function Invoke-AccountJs($ws, [string]$mode) {
     return Invoke-Js $ws ($AccountJs.Replace('__MODE__', $mode))
 }
 
+function Select-AccountFromWindow($accounts) {
+    $form = $null
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $form = New-Object System.Windows.Forms.Form -Property @{
+            Text = 'SAP Note Downloader - Select S-user'
+            TopMost = $true
+            StartPosition = 'CenterScreen'
+            FormBorderStyle = 'FixedDialog'
+            MaximizeBox = $false
+            MinimizeBox = $false
+        }
+        $form.ClientSize = New-Object System.Drawing.Size(600, 260)
+
+        $label = New-Object System.Windows.Forms.Label -Property @{
+            Text = 'Select the S-user account to download SAP Notes.'
+            AutoSize = $true
+        }
+        $label.SetBounds(12, 12, 570, 20)
+        $choices = New-Object System.Windows.Forms.ListBox -Property @{
+            HorizontalScrollbar = $true
+            IntegralHeight = $false
+        }
+        $choices.SetBounds(12, 38, 576, 170)
+        foreach ($account in $accounts) { [void]$choices.Items.Add([string]$account.label) }
+
+        $select = New-Object System.Windows.Forms.Button -Property @{
+            Text = 'Select'
+            Enabled = $false
+            DialogResult = 'OK'
+        }
+        $select.SetBounds(382, 220, 100, 28)
+        $useConsole = New-Object System.Windows.Forms.Button -Property @{
+            Text = 'Use CMD'
+            DialogResult = 'Cancel'
+        }
+        $useConsole.SetBounds(488, 220, 100, 28)
+        $form.Controls.AddRange(@($label, $choices, $select, $useConsole))
+        $form.AcceptButton = $select
+        $form.CancelButton = $useConsole
+        $choices.Add_SelectedIndexChanged({ $select.Enabled = $choices.SelectedIndex -ge 0 })
+        $form.Add_Shown({ $form.Activate(); [void]$choices.Focus() })
+
+        if ($form.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK -and $choices.SelectedIndex -ge 0) {
+            return $accounts[$choices.SelectedIndex].id
+        }
+    } catch {
+        Write-Host "Could not show the account selection window. Use the CMD prompt below."
+        Write-Verbose $_.Exception.Message
+    } finally {
+        if ($form) { $form.Dispose() }
+    }
+}
+
 # Pick the S-user on the "Account selection" page; asks once and saves the choice
 function Select-SapAccount($ws) {
     # assign first: Windows PowerShell 5.1 returns a JSON array as ONE object from the pipeline
@@ -352,7 +411,8 @@ function Select-SapAccount($ws) {
         Write-Host ''
         Write-Host '=== This email has several S-user accounts. Which one should be used? ==='
         for ($i = 0; $i -lt $accs.Count; $i++) { Write-Host ("  {0}) {1}" -f ($i + 1), $accs[$i].label) }
-        while ($true) {
+        $want = Select-AccountFromWindow $accs
+        while (-not $want) {
             $ans = (Read-Host "Enter 1-$($accs.Count) (or the S-user id)").Trim().ToUpper()
             $n = 0
             if ([int]::TryParse($ans, [ref]$n) -and $n -ge 1 -and $n -le $accs.Count) { $want = $accs[$n - 1].id; break }
@@ -676,7 +736,7 @@ function Get-FrameIds($ws) {
 # Rename the finished <guid> file to its real name (adds " (1)" etc. if the name exists)
 function Save-Download([string]$guid, [string]$name) {
     for ($try = 0; $try -lt 10; $try++) {
-        $src = Get-ChildItem -LiteralPath $OutDir -File | Where-Object { $_.Name -like "$guid*" } | Select-Object -First 1
+        $src = Get-Item -LiteralPath (Join-Path $DownloadDir $guid) -ErrorAction SilentlyContinue
         if ($src) {
             $name = $name -replace '[\\/:*?"<>|]', '_'
             if (-not $name) { $name = $guid }
@@ -688,6 +748,36 @@ function Save-Download([string]$guid, [string]$name) {
         Start-Sleep -Milliseconds 500          # Chrome may still be closing the file
     }
     return $null
+}
+
+function Clear-DuplicateDownloads {
+    foreach ($guid in $script:downloads.Keys) {
+        $download = $script:downloads[$guid]
+        if ($download.state -ne 'completed' -or $download.savedPath) { continue }
+
+        try {
+            $file = Get-Item -LiteralPath (Join-Path $DownloadDir $guid) -ErrorAction SilentlyContinue
+            if (-not $file) { continue }
+
+            foreach ($saved in $script:downloads.Values) {
+                if (-not $saved.savedPath -or $saved.name -ne $download.name) { continue }
+                $original = Get-Item -LiteralPath $saved.savedPath -ErrorAction SilentlyContinue
+                if ($original -and $original.Length -eq $file.Length -and
+                    (Get-FileHash -LiteralPath $original.FullName).Hash -eq (Get-FileHash -LiteralPath $file.FullName).Hash) {
+                    Remove-Item -LiteralPath $file.FullName
+                    break
+                }
+            }
+        } catch {
+            Write-Verbose "Unable to check temporary download $guid : $($_.Exception.Message)"
+        }
+    }
+
+    if (Get-ChildItem -LiteralPath $DownloadDir -Force | Select-Object -First 1) {
+        Write-Host "Unmatched temporary files kept in $DownloadDir"
+    } else {
+        [IO.Directory]::Delete($DownloadDir)
+    }
 }
 
 function Save-Debug($ws, [string]$num) {
@@ -800,7 +890,10 @@ function Step-Tab($t) {
                 $d = $script:downloads[$t.guid]
                 if ($d.state -eq 'completed') {
                     $path = Save-Download $t.guid $d.name
-                    if ($path) { Complete-Tab $t 'OK' $path }
+                    if ($path) {
+                        $d.savedPath = $path
+                        Complete-Tab $t 'OK' $path
+                    }
                     else { Complete-Tab $t 'ERROR' "Download finished but file $($t.guid) not found in $OutDir" }
                 } elseif ($d.state -eq 'canceled') {
                     Complete-Tab $t 'ERROR' 'Download was cancelled'
@@ -850,10 +943,12 @@ function Set-DownloadOwners {
     $waiting = @($script:tabs | Where-Object { $_.phase -eq 'wait' -and -not $_.guid } | Sort-Object { $_.clickedAt })
     foreach ($g in $free) {
         $d = $script:downloads[$g]
-        $t = $waiting | Where-Object { -not $_.guid -and ((Get-FrameIds $_.ws) -contains $d.frameId) } | Select-Object -First 1
-        if (-not $t) {
-            # e.g. started from a pop-up: give it to the window that has waited longest
-            $t = $waiting | Where-Object { -not $_.guid } | Select-Object -First 1
+        if ($d.name -match '^(?<note>[0-9]+)_[0-9]+\.sar$') {
+            # SAP's SAR filename identifies the note even when the download starts in a pop-up.
+            $downloadNote = $Matches['note'].TrimStart('0')
+            $t = $waiting | Where-Object { -not $_.guid -and $_.num -eq $downloadNote } | Select-Object -First 1
+        } else {
+            $t = $waiting | Where-Object { -not $_.guid -and ((Get-FrameIds $_.ws) -contains $d.frameId) } | Select-Object -First 1
         }
         if ($t) {
             $d.owner = $t.id; $t.guid = $g
@@ -929,7 +1024,8 @@ if (-not $version) { throw 'Cannot connect to the browser (remote debugging may 
 
 $browserWs = Connect-Cdp $version.webSocketDebuggerUrl
 # Save downloads straight into OutDir (named by guid, renamed when finished), no Save As dialog
-Invoke-Cdp $browserWs 'Browser.setDownloadBehavior' @{ behavior = 'allowAndName'; downloadPath = $OutDir; eventsEnabled = $true } | Out-Null
+$DownloadDir = (New-Item -ItemType Directory -Path (Join-Path $DebugDir "downloads-$([guid]::NewGuid())")).FullName
+Invoke-Cdp $browserWs 'Browser.setDownloadBehavior' @{ behavior = 'allowAndName'; downloadPath = $DownloadDir; eventsEnabled = $true } | Out-Null
 
 $pageTarget = Get-LocalJson "http://127.0.0.1:$Port/json" |
               Where-Object { $_.type -eq 'page' } | Select-Object -First 1
@@ -999,7 +1095,9 @@ try {
         Start-Sleep -Milliseconds 200
     }
 } finally {
+    try { Update-DownloadState } catch { }
     try { Invoke-Cdp $browserWs 'Browser.close' | Out-Null } catch { }
+    try { Clear-DuplicateDownloads } catch { Write-Host "Temporary downloads kept in $DownloadDir" }
 }
 $results = @($script:results | Sort-Object { $list.IndexOf($_.note) })
 
@@ -1020,3 +1118,14 @@ Write-Host ''
 Write-Host "Done: $ok/$($results.Count) succeeded. Files are in $OutDir"
 Write-Host "Log: $log"
 if ($ok -lt $results.Count) { Write-Host "Screenshots of failed notes are in $DebugDir" }
+if ($showCompletionPopup) {
+    $statusText = "Downloaded $ok of $($results.Count) SAP Notes. See the log for details."
+    $icon = if ($ok -lt $results.Count) { 48 } else { 64 }
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        # Show above other windows and close after 20 seconds if nobody dismisses it.
+        [void]$shell.Popup("$statusText`n`nLog: $log", 20, 'SAP Note Downloader', (0x40000 -bor $icon))
+    } catch {
+        Write-Verbose "Unable to show the completion popup: $($_.Exception.Message)"
+    }
+}
