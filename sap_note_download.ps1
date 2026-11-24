@@ -94,6 +94,7 @@ function Select-NotesFile {
     return $null
 }
 
+$showCompletionPopup = -not $Notes -and -not $NotesFile
 $raw = @()
 if ($Notes) { $raw += $Notes }
 if (-not $raw -and -not $NotesFile) {
@@ -1048,3 +1049,14 @@ Write-Host ''
 Write-Host "Done: $ok/$($results.Count) succeeded. Files are in $OutDir"
 Write-Host "Log: $log"
 if ($ok -lt $results.Count) { Write-Host "Screenshots of failed notes are in $DebugDir" }
+if ($showCompletionPopup) {
+    $statusText = "Downloaded $ok of $($results.Count) SAP Notes. See the log for details."
+    $icon = if ($ok -lt $results.Count) { 48 } else { 64 }
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        # Show above other windows and close after 20 seconds if nobody dismisses it.
+        [void]$shell.Popup("$statusText`n`nLog: $log", 20, 'SAP Note Downloader', (0x40000 -bor $icon))
+    } catch {
+        Write-Verbose "Unable to show the completion popup: $($_.Exception.Message)"
+    }
+}
