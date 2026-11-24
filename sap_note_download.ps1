@@ -1113,18 +1113,40 @@ try {
     $results | Export-Csv -LiteralPath $log -NoTypeInformation -Encoding UTF8
 }
 
-$ok = @($results | Where-Object status -eq 'OK').Count
+$failed = @($results | Where-Object status -ne 'OK')
+$ok = $results.Count - $failed.Count
+if ($failed.Count -eq 0) {
+    $outcome = 'SUCCESS'
+    $icon = 64
+} elseif ($ok -eq 0) {
+    $outcome = 'FAILED'
+    $icon = 16
+} else {
+    $outcome = 'PARTIAL SUCCESS'
+    $icon = 48
+}
+$statusText = "$ok succeeded, $($failed.Count) failed."
+if ($failed.Count) {
+    $statusText += "`nFailed notes: $(($failed | Select-Object -First 10 -ExpandProperty note) -join ', ')"
+    if ($failed.Count -gt 10) { $statusText += ' (see log for the full list)' }
+}
+
 Write-Host ''
-Write-Host "Done: $ok/$($results.Count) succeeded. Files are in $OutDir"
+Write-Host "$outcome - $statusText"
+Write-Host "Files are in $OutDir"
 Write-Host "Log: $log"
-if ($ok -lt $results.Count) { Write-Host "Screenshots of failed notes are in $DebugDir" }
+if ($failed.Count) { Write-Host "Screenshots of failed notes are in $DebugDir" }
+
 if ($showCompletionPopup) {
-    $statusText = "Downloaded $ok of $($results.Count) SAP Notes. See the log for details."
-    $icon = if ($ok -lt $results.Count) { 48 } else { 64 }
+    try {
+        Invoke-Item -LiteralPath $OutDir
+    } catch {
+        Write-Host "Could not open the download folder: $OutDir"
+    }
     try {
         $shell = New-Object -ComObject WScript.Shell
         # Show above other windows and close after 20 seconds if nobody dismisses it.
-        [void]$shell.Popup("$statusText`n`nLog: $log", 20, 'SAP Note Downloader', (0x40000 -bor $icon))
+        [void]$shell.Popup("$outcome`n`n$statusText`n`nLog: $log", 20, 'SAP Note Downloader', (0x40000 -bor $icon))
     } catch {
         Write-Verbose "Unable to show the completion popup: $($_.Exception.Message)"
     }
