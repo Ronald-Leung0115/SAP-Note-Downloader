@@ -1113,6 +1113,60 @@ try {
     $results | Export-Csv -LiteralPath $log -NoTypeInformation -Encoding UTF8
 }
 
+function Open-DownloadFolder([string]$path) {
+    Invoke-Item -LiteralPath $path
+    try {
+        if (-not ('SapNoteExplorerWindow' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class SapNoteExplorerWindow
+{
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr window, int command);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr window, int index);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(
+        IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+
+    public static void BringForward(IntPtr window)
+    {
+        if (IsIconic(window)) ShowWindowAsync(window, 9); // SW_RESTORE
+        const uint noSizeMoveOrActivate = 0x0013;
+        bool wasTopmost = (GetWindowLong(window, -20) & 0x0008) != 0; // GWL_EXSTYLE, WS_EX_TOPMOST
+        bool raised = !wasTopmost &&
+            SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, noSizeMoveOrActivate);
+        SetForegroundWindow(window);
+        if (raised) SetWindowPos(window, new IntPtr(-2), 0, 0, 0, 0, noSizeMoveOrActivate);
+    }
+}
+'@
+        }
+        $explorer = New-Object -ComObject Shell.Application
+        $target = $path.TrimEnd('\')
+        $deadline = (Get-Date).AddSeconds(4)
+        do {
+            foreach ($window in $explorer.Windows()) {
+                try {
+                    if ([IO.Path]::GetFileName($window.FullName) -ne 'explorer.exe') { continue }
+                    $folder = [string]$window.Document.Folder.Self.Path
+                    $handle = [IntPtr][long]$window.HWND
+                    if ($handle -ne [IntPtr]::Zero -and $folder.TrimEnd('\') -eq $target) {
+                        [SapNoteExplorerWindow]::BringForward($handle)
+                        return
+                    }
+                } catch {
+                    Write-Verbose $_.Exception.Message
+                }
+            }
+            Start-Sleep -Milliseconds 150
+        } while ((Get-Date) -lt $deadline)
+    } catch {
+        Write-Verbose "Unable to bring the download folder forward: $($_.Exception.Message)"
+    }
+}
+
 $failed = @($results | Where-Object status -ne 'OK')
 $ok = $results.Count - $failed.Count
 if ($failed.Count -eq 0) {
@@ -1139,15 +1193,15 @@ if ($failed.Count) { Write-Host "Screenshots of failed notes are in $DebugDir" }
 
 if ($showCompletionPopup) {
     try {
-        Invoke-Item -LiteralPath $OutDir
-    } catch {
-        Write-Host "Could not open the download folder: $OutDir"
-    }
-    try {
         $shell = New-Object -ComObject WScript.Shell
         # Show above other windows and close after 20 seconds if nobody dismisses it.
         [void]$shell.Popup("$outcome`n`n$statusText`n`nLog: $log", 20, 'SAP Note Downloader', (0x40000 -bor $icon))
     } catch {
         Write-Verbose "Unable to show the completion popup: $($_.Exception.Message)"
+    }
+    try {
+        Open-DownloadFolder $OutDir
+    } catch {
+        Write-Host "Could not open the download folder: $OutDir"
     }
 }
