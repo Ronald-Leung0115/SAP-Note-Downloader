@@ -344,25 +344,58 @@ function Invoke-AccountJs($ws, [string]$mode) {
     return Invoke-Js $ws ($AccountJs.Replace('__MODE__', $mode))
 }
 
-# Match this console by a unique title, including when hosted by Windows Terminal.
-function Show-AccountPromptWindow {
+function Select-AccountFromWindow($accounts) {
+    $form = $null
     try {
-        $shell = New-Object -ComObject WScript.Shell
-        $previousTitle = [Console]::Title
-        $promptTitle = "SAP Note Downloader - Account selection ($PID)"
-        try {
-            [Console]::Title = $promptTitle
-            for ($attempt = 0; $attempt -lt 4; $attempt++) {
-                if ($shell.AppActivate($promptTitle)) { return }
-                Start-Sleep -Milliseconds 100
-            }
-        } finally {
-            [Console]::Title = $previousTitle
+        Add-Type -AssemblyName System.Windows.Forms
+        $form = New-Object System.Windows.Forms.Form -Property @{
+            Text = 'SAP Note Downloader - Select S-user'
+            TopMost = $true
+            StartPosition = 'CenterScreen'
+            FormBorderStyle = 'FixedDialog'
+            MaximizeBox = $false
+            MinimizeBox = $false
+        }
+        $form.ClientSize = New-Object System.Drawing.Size(600, 260)
+
+        $label = New-Object System.Windows.Forms.Label -Property @{
+            Text = 'Select the S-user account to download SAP Notes.'
+            AutoSize = $true
+        }
+        $label.SetBounds(12, 12, 570, 20)
+        $choices = New-Object System.Windows.Forms.ListBox -Property @{
+            HorizontalScrollbar = $true
+            IntegralHeight = $false
+        }
+        $choices.SetBounds(12, 38, 576, 170)
+        foreach ($account in $accounts) { [void]$choices.Items.Add([string]$account.label) }
+
+        $select = New-Object System.Windows.Forms.Button -Property @{
+            Text = 'Select'
+            Enabled = $false
+            DialogResult = 'OK'
+        }
+        $select.SetBounds(382, 220, 100, 28)
+        $useConsole = New-Object System.Windows.Forms.Button -Property @{
+            Text = 'Use CMD'
+            DialogResult = 'Cancel'
+        }
+        $useConsole.SetBounds(488, 220, 100, 28)
+        $form.Controls.AddRange(@($label, $choices, $select, $useConsole))
+        $form.AcceptButton = $select
+        $form.CancelButton = $useConsole
+        $choices.Add_SelectedIndexChanged({ $select.Enabled = $choices.SelectedIndex -ge 0 })
+        $form.Add_Shown({ $form.Activate(); [void]$choices.Focus() })
+
+        if ($form.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK -and $choices.SelectedIndex -ge 0) {
+            return $accounts[$choices.SelectedIndex].id
         }
     } catch {
-        Write-Verbose "Unable to bring the account prompt to the foreground: $($_.Exception.Message)"
+        Write-Host "Could not show the account selection window. Use the CMD prompt below."
+        Write-Verbose $_.Exception.Message
+    } finally {
+        if ($form) { $form.Dispose() }
     }
-    Write-Host 'If this window is behind the browser, press Alt+Tab to select an account here.'
 }
 
 # Pick the S-user on the "Account selection" page; asks once and saves the choice
@@ -378,8 +411,8 @@ function Select-SapAccount($ws) {
         Write-Host ''
         Write-Host '=== This email has several S-user accounts. Which one should be used? ==='
         for ($i = 0; $i -lt $accs.Count; $i++) { Write-Host ("  {0}) {1}" -f ($i + 1), $accs[$i].label) }
-        Show-AccountPromptWindow
-        while ($true) {
+        $want = Select-AccountFromWindow $accs
+        while (-not $want) {
             $ans = (Read-Host "Enter 1-$($accs.Count) (or the S-user id)").Trim().ToUpper()
             $n = 0
             if ([int]::TryParse($ans, [ref]$n) -and $n -ge 1 -and $n -le $accs.Count) { $want = $accs[$n - 1].id; break }

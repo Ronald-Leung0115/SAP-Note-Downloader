@@ -15,7 +15,7 @@ If SAP asks for MFA, complete it in the browser window and press Enter in the co
 
 ## Features
 
-- Automatic login, including the "Account selection" page when one email has several S-users. You choose the account once; the choice is saved in `.sap_account.txt`.
+- Automatic login, including the "Account selection" page when one email has several S-users. Choose your account in the window above the browser, or click **Use CMD** to enter it in the console. Your choice is saved in `.sap_account.txt`.
 - Downloads several notes at the same time in separate browser windows (default 3). To change it:
 
   ```bat
