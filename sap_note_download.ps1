@@ -736,7 +736,7 @@ function Get-FrameIds($ws) {
 # Rename the finished <guid> file to its real name (adds " (1)" etc. if the name exists)
 function Save-Download([string]$guid, [string]$name) {
     for ($try = 0; $try -lt 10; $try++) {
-        $src = Get-ChildItem -LiteralPath $OutDir -File | Where-Object { $_.Name -eq $guid } | Select-Object -First 1
+        $src = Get-Item -LiteralPath (Join-Path $DownloadDir $guid) -ErrorAction SilentlyContinue
         if ($src) {
             $name = $name -replace '[\\/:*?"<>|]', '_'
             if (-not $name) { $name = $guid }
@@ -748,6 +748,36 @@ function Save-Download([string]$guid, [string]$name) {
         Start-Sleep -Milliseconds 500          # Chrome may still be closing the file
     }
     return $null
+}
+
+function Clear-DuplicateDownloads {
+    foreach ($guid in $script:downloads.Keys) {
+        $download = $script:downloads[$guid]
+        if ($download.state -ne 'completed' -or $download.savedPath) { continue }
+
+        try {
+            $file = Get-Item -LiteralPath (Join-Path $DownloadDir $guid) -ErrorAction SilentlyContinue
+            if (-not $file) { continue }
+
+            foreach ($saved in $script:downloads.Values) {
+                if (-not $saved.savedPath -or $saved.name -ne $download.name) { continue }
+                $original = Get-Item -LiteralPath $saved.savedPath -ErrorAction SilentlyContinue
+                if ($original -and $original.Length -eq $file.Length -and
+                    (Get-FileHash -LiteralPath $original.FullName).Hash -eq (Get-FileHash -LiteralPath $file.FullName).Hash) {
+                    Remove-Item -LiteralPath $file.FullName
+                    break
+                }
+            }
+        } catch {
+            Write-Verbose "Unable to check temporary download $guid : $($_.Exception.Message)"
+        }
+    }
+
+    if (Get-ChildItem -LiteralPath $DownloadDir -Force | Select-Object -First 1) {
+        Write-Host "Unmatched temporary files kept in $DownloadDir"
+    } else {
+        [IO.Directory]::Delete($DownloadDir)
+    }
 }
 
 function Save-Debug($ws, [string]$num) {
@@ -860,7 +890,10 @@ function Step-Tab($t) {
                 $d = $script:downloads[$t.guid]
                 if ($d.state -eq 'completed') {
                     $path = Save-Download $t.guid $d.name
-                    if ($path) { Complete-Tab $t 'OK' $path }
+                    if ($path) {
+                        $d.savedPath = $path
+                        Complete-Tab $t 'OK' $path
+                    }
                     else { Complete-Tab $t 'ERROR' "Download finished but file $($t.guid) not found in $OutDir" }
                 } elseif ($d.state -eq 'canceled') {
                     Complete-Tab $t 'ERROR' 'Download was cancelled'
@@ -991,7 +1024,8 @@ if (-not $version) { throw 'Cannot connect to the browser (remote debugging may 
 
 $browserWs = Connect-Cdp $version.webSocketDebuggerUrl
 # Save downloads straight into OutDir (named by guid, renamed when finished), no Save As dialog
-Invoke-Cdp $browserWs 'Browser.setDownloadBehavior' @{ behavior = 'allowAndName'; downloadPath = $OutDir; eventsEnabled = $true } | Out-Null
+$DownloadDir = (New-Item -ItemType Directory -Path (Join-Path $DebugDir "downloads-$([guid]::NewGuid())")).FullName
+Invoke-Cdp $browserWs 'Browser.setDownloadBehavior' @{ behavior = 'allowAndName'; downloadPath = $DownloadDir; eventsEnabled = $true } | Out-Null
 
 $pageTarget = Get-LocalJson "http://127.0.0.1:$Port/json" |
               Where-Object { $_.type -eq 'page' } | Select-Object -First 1
@@ -1061,7 +1095,9 @@ try {
         Start-Sleep -Milliseconds 200
     }
 } finally {
+    try { Update-DownloadState } catch { }
     try { Invoke-Cdp $browserWs 'Browser.close' | Out-Null } catch { }
+    try { Clear-DuplicateDownloads } catch { Write-Host "Temporary downloads kept in $DownloadDir" }
 }
 $results = @($script:results | Sort-Object { $list.IndexOf($_.note) })
 
