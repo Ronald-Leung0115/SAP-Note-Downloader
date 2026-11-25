@@ -9,7 +9,7 @@ Nothing to install: it uses the built-in Windows PowerShell and Google Chrome (o
 1. Double-click `Run_SAP_Note_Download.bat`.
 2. First run only: enter your S-user (or email) and password. They are encrypted with Windows DPAPI in `.sap_credential.xml`, so only your Windows account on this PC can read them.
 3. Type the note numbers separated by spaces or commas, or enter `F` to select a TXT file (one note number per line, `#` starts a comment, see `notes.txt.example`).
-4. The files are saved in `sap_notes\`, with a summary in `sap_notes\download_log.csv`. Interactive runs show a completion popup with the number of successful downloads and the log location.
+4. The files are saved in `sap_notes\`, with a summary in `sap_notes\download_log.csv`. When an interactive run finishes, it shows whether the downloads succeeded, partially succeeded, or failed. When the popup closes, it opens the download folder and brings its Explorer window forward. The popup includes counts, failed note numbers, and the log location.
 
 If SAP asks for MFA, complete it in the browser window and press Enter in the console.
 
